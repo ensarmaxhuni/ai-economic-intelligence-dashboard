@@ -1,43 +1,93 @@
 import streamlit as st
+import plotly.graph_objects as go
+import pandas as pd
 from src.data.fred import FredDataClient
 from src.ai.analyzer import EconomicAnalyzer
 
-# Configure the page layout
-st.set_page_config(page_title="AI Economic Intelligence", page_icon="📈", layout="wide")
+st.set_page_config(page_title="AI Economic Dashboard", page_icon="🏛️", layout="wide", initial_sidebar_state="expanded")
 
-st.title("📈 AI Economic Intelligence Dashboard")
-st.markdown("Real-time macroeconomic data and AI-driven executive analysis.")
-st.divider()
+# --- EXPLICIT ENTERPRISE NAVIGATION ---
+st.sidebar.title("🏛️ Navigation Menu")
+# This line forcefully draws the sidebar menu
+page_selection = st.sidebar.radio("Select Dashboard:", ["Home", "Macro Overview"])
+st.sidebar.divider()
+st.sidebar.caption("Built with Python, Streamlit, Plotly, and the FRED API.")
 
-# Cache the data so it doesn't re-download every time you click a button
-@st.cache_data
-def load_data():
-    client = FredDataClient()
-    return client.get_series('UNRATE')
-
-# Fetch the data
-df = load_data()
-
-if df is not None and not df.empty:
-    # Get the most recent unemployment rate
-    latest_unemployment = df.iloc[-1]['value']
+# --- HOME PAGE ---
+if page_selection == "Home":
+    st.title("🏛 AI Economic Intelligence Platform")
+    st.markdown("### Welcome to the Enterprise Data Terminal")
+    st.markdown("""
+    This platform aggregates real-time macroeconomic data from the **Federal Reserve (FRED)** 
+    and leverages **Artificial Intelligence** to generate institutional-grade market analysis.
     
-    # Create two columns: 70% width for the chart, 30% width for the AI
-    col1, col2 = st.columns([0.7, 0.3])
-    
-    with col1:
-        st.subheader("US Unemployment Rate")
-        # Streamlit makes beautiful charts with one line of code
-        st.line_chart(df.set_index('date')['value'])
+    **👈 Please select 'Macro Overview' from the sidebar menu to begin.**
+    """)
+
+# --- MACRO OVERVIEW PAGE ---
+elif page_selection == "Macro Overview":
+    st.title("🌍 Macroeconomic Overview")
+    st.markdown("Track the 'Big Three' economic indicators driving monetary policy.")
+
+    @st.cache_data
+    def load_core_metrics():
+        client = FredDataClient()
+        unrate = client.get_series('UNRATE')
+        fedfunds = client.get_series('FEDFUNDS')
+        cpi = client.get_series('CPIAUCSL')
         
-    with col2:
-        st.subheader("AI Analysis")
-        # Initialize our mock AI and generate the summary
+        # Calculate YoY Inflation
+        if cpi is not None and not cpi.empty:
+            cpi['value'] = cpi['value'].pct_change(12) * 100
+            cpi = cpi.dropna() 
+            
+        return unrate, fedfunds, cpi
+
+    with st.spinner("Authenticating with Federal Reserve and fetching live data..."):
+        unrate, fedfunds, cpi = load_core_metrics()
+
+    if unrate is not None and fedfunds is not None and cpi is not None:
+        # KPI Metrics
+        st.subheader("Current Core Indicators")
+        col1, col2, col3 = st.columns(3)
+        col1.metric("Unemployment Rate", f"{unrate.iloc[-1]['value']:.1f}%")
+        col2.metric("YoY Inflation (CPI)", f"{cpi.iloc[-1]['value']:.1f}%")
+        col3.metric("Fed Funds Rate", f"{fedfunds.iloc[-1]['value']:.2f}%")
+        
+        st.divider()
+        
+        # Interactive Plotly Chart
+        st.subheader("Historical Trends (10-Year View)")
+        fig = go.Figure()
+        
+        ten_years_ago = pd.Timestamp.now() - pd.DateOffset(years=10)
+        u_plot = unrate[unrate['date'] >= ten_years_ago]
+        c_plot = cpi[cpi['date'] >= ten_years_ago]
+        f_plot = fedfunds[fedfunds['date'] >= ten_years_ago]
+
+        fig.add_trace(go.Scatter(x=u_plot['date'], y=u_plot['value'], name='Unemployment', line=dict(color='#3498DB', width=2.5)))
+        fig.add_trace(go.Scatter(x=c_plot['date'], y=c_plot['value'], name='Inflation (YoY)', line=dict(color='#E74C3C', width=2.5)))
+        fig.add_trace(go.Scatter(x=f_plot['date'], y=f_plot['value'], name='Interest Rate', line=dict(color='#2ECC71', width=2.5)))
+        
+        fig.update_layout(
+            plot_bgcolor='rgba(0,0,0,0)',
+            hovermode='x unified',
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+            xaxis=dict(showgrid=True, gridcolor='lightgrey'),
+            yaxis=dict(showgrid=True, gridcolor='lightgrey', title="Percentage (%)")
+        )
+        
+        st.plotly_chart(fig, use_container_width=True)
+        
+        # AI Analysis
+        st.subheader("🤖 AI Chief Economist Analysis")
         ai = EconomicAnalyzer()
-        summary = ai.generate_executive_summary({"unemployment": latest_unemployment})
-        
-        # Display the AI summary in an info box
+        summary = ai.generate_executive_summary({
+            "unemployment": round(unrate.iloc[-1]['value'], 1),
+            "inflation": round(cpi.iloc[-1]['value'], 1),
+            "interest_rate": round(fedfunds.iloc[-1]['value'], 2)
+        })
         st.info(summary)
-else:
-    st.error("⚠️ Failed to load data from the FRED API. Please check your API key and connection.")
-    
+    else:
+        st.error("⚠️ Failed to load data. Check API keys and connection.")
+        
